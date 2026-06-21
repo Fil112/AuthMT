@@ -1,0 +1,12 @@
+name: AuthMT
+version: 1.0.0
+main: mt.auth.AuthMT
+api-version: '1.16'
+
+commands:
+  login:
+    description: Авторизация на сервере
+    usage: /login <пароль>
+  register:
+    description: Регистрация на сервере
+    usage: /register <пароль> <повтор_пароля>
