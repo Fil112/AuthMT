@@ -10,11 +10,15 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.*;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 public class PlayerListener implements Listener {
 
     private final AuthMT plugin;
+    // Временное хранилище для локаций игроков до их авторизации
+    public static final Map<UUID, Location> preAuthLocations = new HashMap<>();
 
     public PlayerListener(AuthMT plugin) {
         this.plugin = plugin;
@@ -27,7 +31,11 @@ public class PlayerListener implements Listener {
 
         // Проверяем, есть ли у игрока действующая сессия (заходил ли он недавно)
         if (!plugin.getSessionManager().hasValidSession(uuid)) {
-            // Если сессии нет, отправляем в мир-пустоту
+
+            // 1. Сохраняем ту точку, где игрок находился в основном мире
+            preAuthLocations.put(uuid, player.getLocation());
+
+            // 2. Отправляем в мир-пустоту
             String authWorldName = plugin.getConfig().getString("auth-world", "auth");
             World authWorld = Bukkit.getWorld(authWorldName);
 
@@ -47,8 +55,13 @@ public class PlayerListener implements Listener {
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        // При выходе игрока обновляем время его сессии, чтобы начать отсчет таймаута
-        plugin.getSessionManager().saveSession(event.getPlayer().getUniqueId());
+        UUID uuid = event.getPlayer().getUniqueId();
+
+        // При выходе обновляем время сессии
+        plugin.getSessionManager().saveSession(uuid);
+
+        // Очищаем локацию из памяти, если игрок вышел, так и не введя пароль
+        preAuthLocations.remove(uuid);
     }
 
     @EventHandler
@@ -62,7 +75,7 @@ public class PlayerListener implements Listener {
 
             // Разрешаем крутить головой (изменение Yaw/Pitch), но запрещаем менять координаты X/Y/Z
             if (to != null && (from.getX() != to.getX() || from.getY() != to.getY() || from.getZ() != to.getZ())) {
-                // Возвращаем игрока на исходную точку, вместо отмены события (чтобы не было дерганий камеры)
+                // Возвращаем игрока на исходную точку (в мире auth), чтобы не было дерганий камеры
                 event.setTo(from);
             }
         }
@@ -79,15 +92,32 @@ public class PlayerListener implements Listener {
 
     @EventHandler
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
-        String message = event.getMessage().toLowerCase();
+        String message = event.getMessage();
+        String[] args = message.split(" ");
+        String cmd = args[0].substring(1).toLowerCase(); // Убираем слэш '/'
 
-        // Если игрок не авторизован
-        if (!plugin.getSessionManager().hasValidSession(event.getPlayer().getUniqueId())) {
-            // Разрешаем только команды авторизации
-            if (!message.startsWith("/login") && !message.startsWith("/register")) {
-                event.setCancelled(true);
-                event.getPlayer().sendMessage(ChatColor.RED + "Сначала авторизуйтесь с помощью /login или /register!");
-            }
+        Player player = event.getPlayer();
+
+        // 1. ПЕРЕХВАТ КОМАНД АВТОРИЗАЦИИ (ЧТОБЫ СКРЫТЬ ИХ ИЗ КОНСОЛИ)
+        if (cmd.equals("login") || cmd.equals("l") || cmd.equals("log") ||
+                cmd.equals("register") || cmd.equals("reg")) {
+
+            // ОТМЕНЯЕМ событие. Ядро сервера не запишет эту строку в latest.log!
+            event.setCancelled(true);
+
+            // Собираем аргументы (сами пароли) в отдельный массив
+            String[] cmdArgs = new String[args.length - 1];
+            System.arraycopy(args, 1, cmdArgs, 0, args.length - 1);
+
+            // Передаем логику вручную напрямую в наш AuthCommand
+            plugin.getAuthCommand().handleAuthLogic(player, cmd, cmdArgs);
+            return; // Прерываем дальнейшую проверку
+        }
+
+        // 2. БЛОКИРОВКА ОСТАЛЬНЫХ КОМАНД ДО АВТОРИЗАЦИИ
+        if (!plugin.getSessionManager().hasValidSession(player.getUniqueId())) {
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "Сначала авторизуйтесь с помощью /login или /register!");
         }
     }
 }

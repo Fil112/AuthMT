@@ -7,24 +7,24 @@ import mt.auth.managers.SessionManager;
 import mt.auth.managers.storage.FileStorage;
 import mt.auth.managers.storage.SQLiteStorage;
 import mt.auth.utils.ConfigUtil;
+import org.bukkit.WorldCreator;
+import org.bukkit.WorldType;
 import org.bukkit.plugin.java.JavaPlugin;
 
-/**
- * Главный класс плагина AuthMT.
- */
 public class AuthMT extends JavaPlugin {
 
     private DatabaseManager databaseManager;
     private SessionManager sessionManager;
     private ConfigUtil configUtil;
+    private AuthCommand authCommand; // Ссылка на наш обработчик
 
     @Override
     public void onEnable() {
-        // 1. Инициализация конфига
         configUtil = new ConfigUtil(this);
         configUtil.setup();
 
-        // 2. Выбор и запуск базы данных на основе настроек
+        setupAuthWorld();
+
         String storageType = configUtil.getString("storage-type", "sqlite");
         if (storageType.equalsIgnoreCase("sqlite")) {
             databaseManager = new SQLiteStorage(this);
@@ -33,16 +33,14 @@ public class AuthMT extends JavaPlugin {
         }
         databaseManager.init();
 
-        // 3. Инициализация менеджера сессий (для оперативной памяти)
         sessionManager = new SessionManager(this);
 
-        // 4. Регистрация команд /login и /register
-        AuthCommand authCommand = new AuthCommand(this);
-        // Важно: эти команды должны быть прописаны в plugin.yml!
+        // Инициализируем и регистрируем команды
+        authCommand = new AuthCommand(this);
         if (getCommand("login") != null) getCommand("login").setExecutor(authCommand);
         if (getCommand("register") != null) getCommand("register").setExecutor(authCommand);
+        if (getCommand("amt") != null) getCommand("amt").setExecutor(authCommand);
 
-        // 5. Регистрация слушателя событий (перемещение, чат, вход)
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
 
         getLogger().info("=====================================");
@@ -53,24 +51,26 @@ public class AuthMT extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        // При выключении сервера обязательно закрываем SQLite (если он выбран),
-        // чтобы не повредить файл database.db
         if (databaseManager instanceof SQLiteStorage) {
             ((SQLiteStorage) databaseManager).closeConnection();
         }
         getLogger().info("Плагин AuthMT выключен.");
     }
 
-    // Геттеры для доступа к менеджерам из других классов
-    public DatabaseManager getDatabaseManager() {
-        return databaseManager;
+    private void setupAuthWorld() {
+        String worldName = configUtil.getString("auth-world", "auth");
+        if (getServer().getWorld(worldName) == null) {
+            getLogger().info("Мир авторизации не найден. Создаю/загружаю мир: " + worldName);
+            WorldCreator wc = new WorldCreator(worldName);
+            wc.type(WorldType.FLAT);
+            wc.generateStructures(false);
+            getServer().createWorld(wc);
+            getLogger().info("Мир " + worldName + " успешно инициализирован!");
+        }
     }
 
-    public SessionManager getSessionManager() {
-        return sessionManager;
-    }
-
-    public ConfigUtil getConfigUtil() {
-        return configUtil;
-    }
+    public DatabaseManager getDatabaseManager() { return databaseManager; }
+    public SessionManager getSessionManager() { return sessionManager; }
+    public ConfigUtil getConfigUtil() { return configUtil; }
+    public AuthCommand getAuthCommand() { return authCommand; } // Геттер для команд
 }
